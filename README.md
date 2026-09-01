@@ -7,11 +7,12 @@ scratch. Right now: the 9 data qubits.
 
 ```text
 surface_code/
-├── core/       # Pauli and stabilizer-code algebra
-├── patches/    # Geometry and the rotated distance-3 patch definition
-├── circuits/   # Circuit operations and syndrome extraction
-├── decoders/   # Decoder implementations
-└── __init__.py # Stable public API
+    ├── core/         # Pauli and stabilizer-code algebra
+    ├── patches/      # Geometry and the rotated distance-3 patch definition
+    ├── circuits/     # Circuit operations and syndrome extraction
+    ├── decoders/     # Decoder implementations
+    ├── simulation/   # Simulator backends (Aer first)
+    └── __init__.py   # Stable public API
 ```
 
 The concrete patch is defined once in `patches/rotated_d3.py`. Existing names
