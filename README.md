@@ -18,3 +18,11 @@ surface_code/
 The concrete patch is defined once in `patches/rotated_d3.py`. Existing names
 such as `Pauli`, `decode`, `STABILIZERS`, and `extract_syndrome` remain
 available directly from `surface_code`.
+
+## Run Aer
+
+```bash
+./sim
+```
+
+Then choose physical \(X_i\) or \(Z_i\), logical \(X\) or \(Z\), or measure.
