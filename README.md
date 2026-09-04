@@ -1,7 +1,8 @@
 # Surface code
 
-Distance-3 rotated planar code, aimed at IBM. We are writing it from
-scratch. Right now: the 9 data qubits.
+Distance-3 rotated planar code, designed independently of any backend. We are
+writing it from scratch, with IBM Quantum as the first planned hardware target.
+Right now: the 9 data qubits.
 
 ## Package structure
 
@@ -50,6 +51,37 @@ surface-code circuit X4
 surface-code sweep --axes XYZ --weight 1
 surface-code sweep --weight 2 --failures-only
 ```
+
+## Repeated-round memory groundwork
+
+The `memory` command prepares logical zero, repeatedly measures and resets the
+eight ancillas, retains a separate syndrome register for every round, and then
+measures the data qubits in Z:
+
+```bash
+# Run the project's vendor-neutral baseline noise model.
+surface-code memory --rounds 4 --shots 256
+
+# Override circuit, readout, and reset error rates.
+surface-code memory --rounds 8 --shots 1024 --seed 7 \
+  --single-qubit-error 0.001 --two-qubit-error 0.01 \
+  --readout-error 0.02 --reset-error 0.01
+
+# Use the same experiment with no noise.
+surface-code memory --rounds 4 --shots 256 --ideal
+
+# Inspect the actual repeated circuit.
+surface-code circuit --rounds 3
+```
+
+The baseline rates (0.1% one-qubit, 1% two-qubit, 2% readout, and 1% reset) are
+fixed project parameters for reproducible comparisons, not an imitation of an
+IBM device or live calibration data. The model does not yet include hardware
+topology, T1/T2 idle decay, leakage, crosstalk, or a space-time decoder. Logical
+zero is still prepared by the simulator-oriented synthesized Clifford rather
+than a fault-tolerant protocol. Accordingly, the command reports raw syndrome
+and detection-event rates plus a clearly labeled last-round-only diagnostic; it
+does not claim a logical lifetime yet.
 
 `--draw-error P [--draws N]` samples code-capacity Pauli errors on the data
 qubits before the ideal circuit runs. The resulting Pauli is fixed across all
