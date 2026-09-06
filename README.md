@@ -146,3 +146,34 @@ reproduce both the draw and Aer sampling.
 Run `surface-code --help` for the commands and `surface-code COMMAND --help`
 for command-specific options. `./sim` is a repository-local shortcut when a
 `.venv` exists at the project root.
+
+## Memory fidelity against storage time
+
+`scripts/plot_memory_by_time.py` sweeps storage times from 10 to 200 µs for
+n = 0, 1, 2, 4, 8, 16, 32, and 64 syndrome rounds spread evenly over each
+window, then plots decoded logical-Z fidelity against an analytic unencoded
+qubit under the same idle and readout noise. That dashed line is the
+break-even bar: a curve above it means encoding helped.
+
+![Logical-Z fidelity vs storage time, IBM Heron-like parameters](artifacts/memory-by-time-ibm-heron-product/logical-z-fidelity-vs-time.png)
+
+With Heron-like parameters and product-state preparation the code beats the
+bare qubit at every storage time, and every doubling of the round count keeps
+helping. Under the project baseline the picture inverts: every encoded curve
+sits below the bare qubit, because each 1 µs round adds more error than it
+removes at those rates.
+
+![Logical-Z fidelity vs storage time, project baseline](artifacts/memory-by-time/logical-z-fidelity-vs-time.png)
+
+Each folder under `artifacts/` holds the full data (`data.json`, `data.csv`),
+the figures, and the settings and library digest that produced them. To
+regenerate or redraw:
+
+```bash
+python -m pip install -e '.[sim,plot]'
+python scripts/plot_memory_by_time.py --profile ibm-heron --prep product
+python scripts/plot_memory_by_time.py --plot-only          # redraw the baseline
+```
+
+Runs are resumable and extend an existing grid without repeating finished
+points.
