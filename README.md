@@ -166,14 +166,19 @@ removes at those rates.
 ![Logical-Z fidelity vs storage time, project baseline](artifacts/memory-by-time/logical-z-fidelity-vs-time.png)
 
 Each folder under `artifacts/` holds the full data (`data.json`, `data.csv`),
-the figures, and the settings and library digest that produced them. To
-regenerate or redraw:
+the figures, and the settings and library digest that produced them. New sweeps
+default to 500 shots per point; the saved figures above used 5,000. Use a new
+output directory when changing the shot count to keep the existing results.
+To run a new sweep or redraw saved data:
 
 ```bash
 python -m pip install -e '.[sim,plot]'
-python scripts/plot_memory_by_time.py --profile ibm-heron --prep product
+python scripts/plot_memory_by_time.py --profile ibm-heron --prep product \
+  --output-dir artifacts/memory-by-time-ibm-heron-product-500-shots
 python scripts/plot_memory_by_time.py --plot-only          # redraw the baseline
 ```
+
+Pass `--shots 5000` for a higher-statistics sweep.
 
 Runs are resumable and extend an existing grid without repeating finished
 points. Resuming normally requires the same source and settings. If you
