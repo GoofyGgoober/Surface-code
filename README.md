@@ -176,4 +176,19 @@ python scripts/plot_memory_by_time.py --plot-only          # redraw the baseline
 ```
 
 Runs are resumable and extend an existing grid without repeating finished
-points.
+points. Resuming normally requires the same source and settings. If you
+deliberately use `--ignore-source-change`, each saved point retains its own
+source digest; mixing versions is not a substitute for rerunning an experiment.
+
+## Development checks
+
+```bash
+python -m pip install -e '.[dev]'
+python -m pytest -q
+ruff check src tests scripts
+ruff format --check src tests scripts
+```
+
+CLI argument definitions live in `simulation/cli_arguments.py`; command execution
+and interactive behavior live in `simulation/cli.py`. Simulator dependencies stay
+lazy, so importing the algebra and decoders does not require Qiskit.
