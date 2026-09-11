@@ -17,12 +17,14 @@ branch. It becomes the test harness for the heavy-hex patch.
 
 ## Docs
 
-- `docs/memory-cadence.md` — the fixed-duration cadence experiment (math,
-  controls, limits). Written for the old patch; the protocol carries over.
-- `docs/ml-decoder.md` — planned learned decoder. Same interface as the
-  current one, trained on sim shots, judged on cadence sweeps.
+- `docs/ml-decoder.md` — planned learned decoder for the heavy-hex code.
 - `docs/heavy-hex.md` — coming: gauge set, stabilizers, logicals, round
   schedule for d=3 and d=5.
+
+The old lifetime experiment (cadence sweeps, noise profiles, figures) is
+frozen in the
+[`lifetime-preservation`](https://github.com/GoofyGgoober/Surface-code/tree/lifetime-preservation)
+branch, including its docs and data.
 
 ## Layout
 
@@ -31,28 +33,19 @@ surface_code/
 ├── core/         # Pauli and stabilizer-code algebra
 ├── patches/      # Patch definitions (rotated d=3 today, heavy-hex next)
 ├── circuits/     # Circuit operations and syndrome extraction
-├── decoders/     # Exact history decoder, min-weight lookup
-├── simulation/   # Aer runners, cadence sweeps, noise profiles
+├── decoders/     # Min-weight lookup, shared basis validation
+├── simulation/   # Aer runner, one-round explorer CLI
 ```
 
 ## Run
 
 ```bash
 python -m pip install -e '.[sim]'
-surface-code cadence --time-us 10 --rounds 0 1 2 4 8 --shots 4096 --seed 7
+surface-code X4 --shots 128 --seed 7
+surface-code sweep --weight 2 --failures-only
 ```
 
-`--profile` picks a noise set (`baseline`, `ibm-heron`, `google-willow`);
-explicit rates override it. `--preparation product` starts data qubits in
-|0⟩/|+⟩ as hardware runs do, instead of the synthesized encoder.
 `surface-code --help` lists the rest; `./sim` works when `.venv` exists.
-
-## What the sims say so far
-
-With Heron-like rates and product prep, encoding beats the bare qubit at
-every storage time and more rounds keep helping. Under the loud project
-baseline every encoded curve sits below bare — each round adds more error
-than it removes. Figures and data live in `artifacts/`.
 
 ## Checks
 
