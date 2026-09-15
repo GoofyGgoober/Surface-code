@@ -6,8 +6,11 @@ one. Built from scratch: patch, circuits, decoder, analysis.
 The code is the heavy-hex subsystem code ([Chamberland et al., PRX
 2020](https://arxiv.org/abs/1907.09528)), demonstrated by IBM in [Sundaresan
 et al., Nat. Commun. 2023](https://arxiv.org/abs/2203.07205). d=3 runs on 23
-qubits (9 data + 14 syndrome/flag); d=5 on 57. Both fit on fez's 156 at once,
-so \(\Lambda = p_L(3)/p_L(5)\) gets measured on one calibration.
+qubits (9 data + 14 syndrome/flag). The relay-preserving d=5 layout uses 65
+sites (25 data + 20 X ancillas + 12 Z ancillas + 8 boundary relays), rather
+than the idealized 57-site count. Both layouts fit disjointly on fez's 156
+sites. The planned comparison is \(\Lambda = p_L(3)/p_L(5)\); larger distance
+is not guaranteed to improve the measured error rate.
 
 Status: spec phase. The simulator stack — Aer memory circuits, history
 decoder, cadence sweeps, noise profiles — was built for a [[9,1,3]] rotated
@@ -17,6 +20,10 @@ branch. It becomes the test harness for the heavy-hex patch.
 
 ## Docs
 
+- [Heavy-hex blueprint: d=3 and d=5 on Fez](docs/figures/heavyhex-blueprint.png) — both physical
+  layouts and their gauges/stabilizers. The original d=3 placement is preserved;
+  d=5 is a connectivity-validated extension, not yet an executable circuit.
+  Regenerate offline with `python docs/figures/draw_blueprint.py` (requires Matplotlib).
 - `docs/ml-decoder.md` — planned learned decoder for the heavy-hex code.
 - `docs/heavy-hex.md` — coming: gauge set, stabilizers, logicals, round
   schedule for d=3 and d=5.
