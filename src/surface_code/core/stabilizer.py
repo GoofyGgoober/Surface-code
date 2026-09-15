@@ -140,6 +140,6 @@ class StabilizerCode:
                 best = weight
         return best
 
-    def parameters(self) -> tuple[int, int, int]:
+    def parameters(self) -> tuple[int, ...]:
         k = self.n - self.stabilizer_rank()
         return (self.n, k, self.distance())

@@ -1,46 +1,24 @@
-from .circuits import SYNDROME_CIRCUIT, abstract_syndrome, extract_syndrome
-from .core import Pauli
-from .decoders import decode, z_basis_success
-from .patches import (
-    ANCILLAS,
-    DATA_QUBITS,
-    DISTANCE,
-    LOGICAL_X,
-    LOGICAL_Z,
-    PATCH,
-    STABILIZERS,
-    X_ANCILLAS,
-    X_CHECKS,
-    X_STABILIZERS,
-    Z_ANCILLAS,
-    Z_CHECKS,
-    Z_STABILIZERS,
-    data_qubit,
-    is_logical,
-    parameters,
-)
+"""Heavy-hex subsystem codes for distance 3 and 5."""
+
+from .circuits import abstract_syndrome, extract_syndrome, gauge_flips, syndrome_circuit
+from .core import Pauli, SubsystemCode
+from .decoders import basis_success, decode, z_basis_success
+from .patches import HEAVY_HEX_D3, HEAVY_HEX_D5, PATCH, Gauge, HeavyHexPatch, get_patch
 
 __all__ = [
-    "ANCILLAS",
-    "DATA_QUBITS",
-    "DISTANCE",
-    "LOGICAL_X",
-    "LOGICAL_Z",
+    "HEAVY_HEX_D3",
+    "HEAVY_HEX_D5",
     "PATCH",
-    "STABILIZERS",
-    "SYNDROME_CIRCUIT",
-    "X_ANCILLAS",
-    "X_CHECKS",
-    "X_STABILIZERS",
-    "Z_ANCILLAS",
-    "Z_CHECKS",
-    "Z_STABILIZERS",
+    "Gauge",
+    "HeavyHexPatch",
     "Pauli",
+    "SubsystemCode",
+    "get_patch",
     "abstract_syndrome",
-    "data_qubit",
-    "decode",
     "extract_syndrome",
-    "is_logical",
-    "parameters",
+    "gauge_flips",
+    "syndrome_circuit",
+    "basis_success",
+    "decode",
     "z_basis_success",
 ]

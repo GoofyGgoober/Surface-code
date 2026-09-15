@@ -1,100 +1,61 @@
+from itertools import combinations, product
+
 import pytest
 
-from surface_code import (
-    DATA_QUBITS,
-    LOGICAL_X,
-    LOGICAL_Z,
-    Pauli,
-    decode,
-    extract_syndrome,
-    z_basis_success,
-)
-from surface_code.core import StabilizerCode
-from surface_code.patches import PATCH
-from surface_code.patches.parameters import in_stabilizer_group
+from surface_code import Pauli, get_patch
+from surface_code.decoders import basis_success, decode
 
 
-def _single_qubit_errors() -> list[Pauli]:
-    errors = []
-    for qubit in DATA_QUBITS:
-        x = Pauli.x_on((qubit,))
-        z = Pauli.z_on((qubit,))
-        errors.extend((x, z, x * z))
-    return errors
+def errors_of_weight(qubits, weight):
+    for support in combinations(qubits, weight):
+        for axes in product("XYZ", repeat=weight):
+            yield Pauli(
+                frozenset(q for q, axis in zip(support, axes) if axis in "XY"),
+                frozenset(q for q, axis in zip(support, axes) if axis in "YZ"),
+            )
 
 
-def _all_syndromes() -> list[tuple[int, ...]]:
-    width = PATCH.code.syndrome_size
-    return [tuple((n >> i) & 1 for i in range(width)) for n in range(1 << width)]
+@pytest.mark.parametrize("distance", [3, 5])
+def test_all_correctable_data_paulis_are_corrected_modulo_gauges(distance):
+    code = get_patch(distance).code
+    for weight in range((distance - 1) // 2 + 1):
+        for error in errors_of_weight(code.data_qubits, weight):
+            correction = decode(code.syndrome(error), code)
+            assert code.in_gauge_group(correction * error)
 
 
-def _syndrome_xor(left: tuple[int, ...], right: tuple[int, ...]) -> tuple[int, ...]:
-    return tuple(a ^ b for a, b in zip(left, right))
+@pytest.mark.parametrize("distance", [3, 5])
+def test_every_syndrome_has_a_consistent_correction(distance):
+    code = get_patch(distance).code
+    for syndrome in product((0, 1), repeat=code.syndrome_size):
+        assert code.syndrome(decode(syndrome, code)) == syndrome
 
 
-def _minimum_weights_by_syndrome() -> dict[tuple[int, ...], int]:
-    """Independent shortest-path oracle using weight-1 syndrome transitions."""
-    zero = (0,) * PATCH.code.syndrome_size
-    steps = {extract_syndrome(error) for error in _single_qubit_errors()}
-    weights = {zero: 0}
-    frontier = {zero}
-    while frontier:
-        next_frontier: set[tuple[int, ...]] = set()
-        for syndrome in frontier:
-            for step in steps:
-                candidate = _syndrome_xor(syndrome, step)
-                if candidate not in weights:
-                    weights[candidate] = weights[syndrome] + 1
-                    next_frontier.add(candidate)
-        frontier = next_frontier
-    return weights
+def test_d3_decoder_is_minimum_weight_in_each_css_sector():
+    code = get_patch(3).code
+    # Independent exhaustive oracle over all 2**9 pure-X and pure-Z errors.
+    for axis in "XZ":
+        weights = {}
+        for weight in range(code.n + 1):
+            for support in combinations(code.data_qubits, weight):
+                error = Pauli.x_on(support) if axis == "X" else Pauli.z_on(support)
+                weights.setdefault(code.syndrome(error), weight)
+        for syndrome, minimum in weights.items():
+            assert decode(syndrome, code).weight() == minimum
 
 
-def test_trivial_syndrome_is_identity():
-    assert decode((0, 0, 0, 0, 0, 0, 0, 0)) == Pauli()
+@pytest.mark.parametrize("distance", [3, 5])
+def test_logical_and_gauge_classification_in_both_bases(distance):
+    p = get_patch(distance)
+    for basis, flip, harmless in (("Z", p.logical_x, p.logical_z), ("X", p.logical_z, p.logical_x)):
+        assert basis_success(flip, p.code, basis=basis) == 0
+        assert basis_success(harmless, p.code, basis=basis) == 1
+        assert all(basis_success(g.pauli, p.code, basis=basis) for g in p.gauges)
 
 
-def test_weight1_errors_are_corrected_up_to_a_stabilizer():
-    for error in _single_qubit_errors():
-        correction = decode(extract_syndrome(error))
-        assert correction.weight() <= 1
-        assert in_stabilizer_group(correction * error)
-
-
-def test_every_syndrome_has_a_min_weight_correction():
-    minimum_weights = _minimum_weights_by_syndrome()
-    assert set(minimum_weights) == set(_all_syndromes())
-
-    for syndrome in _all_syndromes():
-        correction = decode(syndrome)
-        assert extract_syndrome(correction) == syndrome
-        assert correction.weight() == minimum_weights[syndrome]
-
-
-def test_two_errors_on_logical_x_decode_the_other_end():
-    error = Pauli.x_on((0, 3))
-    assert decode(extract_syndrome(error)) == Pauli.x_on((6,))
-    assert z_basis_success(error) == 0
-
-
-def test_z_basis_success():
-    assert z_basis_success(Pauli()) == 1
-    assert all(z_basis_success(Pauli.x_on((q,))) == 1 for q in DATA_QUBITS)
-    assert extract_syndrome(LOGICAL_X) == (0,) * 8
-    assert z_basis_success(LOGICAL_X) == 0
-    assert z_basis_success(LOGICAL_Z) == 1
-
-
-def test_decoder_handles_redundant_stabilizer_checks():
-    code = StabilizerCode(
-        data_qubits=(0, 1, 2),
-        stabilizers=(Pauli.z_on((0, 1)), Pauli.z_on((1, 2)), Pauli.z_on((0, 2))),
-        logical_x=Pauli.x_on((0, 1, 2)),
-        logical_z=Pauli.z_on((0,)),
-    )
-    for qubit in code.data_qubits:
-        error = Pauli.x_on((qubit,))
-        assert decode(code.syndrome(error), code) == error
-    # The third syndrome bit is the XOR of the first two.
-    with pytest.raises(ValueError, match="inconsistent with the stabilizers"):
-        decode((0, 0, 1), code)
+@pytest.mark.parametrize("distance", [3, 5])
+def test_decoder_validates_syndrome_width_and_bits(distance):
+    code = get_patch(distance).code
+    for syndrome in ((0,), (2,) + (0,) * (code.syndrome_size - 1)):
+        with pytest.raises(ValueError, match="binary bits"):
+            decode(syndrome, code)

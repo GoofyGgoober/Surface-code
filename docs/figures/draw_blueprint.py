@@ -29,9 +29,11 @@ import re
 
 import matplotlib.patheffects as pe
 import matplotlib.pyplot as plt
-from heavyhex_layout import build_layout
 from matplotlib.lines import Line2D
 from matplotlib.patches import FancyBboxPatch, Rectangle
+
+from surface_code.layouts import build_layout, load_fez_map
+from surface_code.patches import get_patch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GOLD = "#F2C230"
@@ -44,18 +46,12 @@ TINT = {"#2A78D6": "#CDDFF5", "#E4574C": "#F7D4D1"}
 
 # --- code definition (column-major labels: Qk sits at row (k-1)%3+1) --------
 CELL = {k: ((k - 1) % 3 + 1, (k - 1) // 3 + 1) for k in range(1, 10)}
-X_GAUGE = {
-    "X1X4": (1, 4),
-    "X2X5": (2, 5),
-    "X3X6": (3, 6),
-    "X4X7": (4, 7),
-    "X5X8": (5, 8),
-    "X6X9": (6, 9),
-}
-Z_GAUGE = {"Z1Z2": (1, 2), "Z8Z9": (8, 9), "Z2Z3Z5Z6": (2, 3, 5, 6), "Z4Z5Z7Z8": (4, 5, 7, 8)}
-X_STAB = {"X1X2X4X5": (1, 2, 4, 5), "X4X7": (4, 7), "X3X6": (3, 6), "X5X6X8X9": (5, 6, 8, 9)}
-Z_STAB = {"Z1Z2Z4Z5Z7Z8": (1, 2, 4, 5, 7, 8), "Z2Z3Z5Z6Z8Z9": (2, 3, 5, 6, 8, 9)}
-X_L, Z_L = (1, 2, 3), (1, 4, 7)
+PATCH = get_patch(3)
+X_GAUGE = {g.name: tuple(sorted(g.support)) for g in PATCH.x_gauges}
+Z_GAUGE = {g.name: tuple(sorted(g.support)) for g in PATCH.z_gauges}
+X_STAB = {"".join(f"X{q}" for q in sorted(s.x)): tuple(sorted(s.x)) for s in PATCH.x_stabilizers}
+Z_STAB = {"".join(f"Z{q}" for q in sorted(s.z)): tuple(sorted(s.z)) for s in PATCH.z_stabilizers}
+X_L, Z_L = tuple(sorted(PATCH.logical_x.x)), tuple(sorted(PATCH.logical_z.z))
 
 # --- device assignment, in Falcon-27 numbering ------------------------------
 DATA = {1: 2, 2: 10, 3: 17, 4: 5, 5: 13, 6: 21, 7: 9, 8: 16, 9: 24}
@@ -84,8 +80,7 @@ def cell(k, d=3):
 
 
 def main() -> None:
-    with open(os.path.join(HERE, "fez_map.json")) as file:
-        device_map = json.load(file)
+    device_map = load_fez_map()
     coords, edges = device_map["coords"], device_map["edges"]
     n = len(coords)
     bonds = {tuple(sorted(e)) for e in edges}

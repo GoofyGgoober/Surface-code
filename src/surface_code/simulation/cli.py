@@ -1,4 +1,4 @@
-"""Command-line tools for exploring the rotated distance-3 surface code."""
+"""Command-line tools for exploring the distance-3 and distance-5 heavy-hex codes."""
 
 from __future__ import annotations
 
@@ -14,47 +14,27 @@ from typing import Any
 from .._validation import validate_binary_bits
 from ..core import Pauli
 from ..decoders import decode, z_basis_success
-from ..patches import PATCH
+from ..layouts import get_fez_layout
+from ..patches import PATCH, HeavyHexPatch, get_patch
 from .aer import run_aer, shot_z_success, to_qiskit
-from .cli_arguments import (
-    DEFAULT_SHOTS as DEFAULT_SHOTS,
-)
-from .cli_arguments import (
-    build_parser as build_parser,
-)
-from .cli_arguments import (
-    parse_data_qubit,
-    parse_positive_int,
-    parse_probability,
-)
-from .cli_arguments import (
-    parse_error as parse_error,
-)
-from .cli_arguments import (
-    parse_syndrome as parse_syndrome,
-)
+from .cli_arguments import DEFAULT_SHOTS as DEFAULT_SHOTS
+from .cli_arguments import build_parser as build_parser
+from .cli_arguments import parse_data_qubit, parse_positive_int, parse_probability
+from .cli_arguments import parse_error as parse_error
+from .cli_arguments import parse_syndrome as parse_syndrome
 from .noise import depolarizing_error
 
-_COMMANDS = {
-    "run",
-    "interactive",
-    "syndrome",
-    "decode",
-    "sweep",
-    "circuit",
-    "info",
-}
+_COMMANDS = {"run", "interactive", "syndrome", "decode", "sweep", "circuit", "info"}
 Syndrome = tuple[int, ...]
 DataBits = tuple[int, ...]
 Tallies = dict[tuple[Syndrome, DataBits], int]
-
 MENU: tuple[tuple[str, str], ...] = (
     ("1 / x N", "Toggle physical X on data qubit N"),
     ("2 / z N", "Toggle physical Z on data qubit N"),
     ("6 / y N", "Toggle physical Y on data qubit N"),
     ("3 / xl", "Toggle logical X"),
     ("4 / zl", "Toggle logical Z"),
-    ("add P", "Apply a Pauli expression, e.g. X0 Z3"),
+    ("add P", "Apply a Pauli expression, e.g. X1 Z3"),
     ("5 / measure", "Run the ideal Aer measurement"),
     ("d / draw", "Draw one random code-capacity Pauli error"),
     ("p / rate P", "Set the per-qubit draw probability"),
@@ -65,7 +45,7 @@ MENU: tuple[tuple[str, str], ...] = (
 )
 
 
-def format_pauli(pauli: Pauli) -> str:
+def format_pauli(pauli: Pauli, *, patch: HeavyHexPatch = PATCH) -> str:
     if not (pauli.x or pauli.z):
         return "I"
     parts: list[str] = []
@@ -77,69 +57,71 @@ def format_pauli(pauli: Pauli) -> str:
         else:
             parts.append(f"Z{qubit}")
     text = " ".join(parts)
-    logical_y = PATCH.logical_x * PATCH.logical_z
-    if pauli == PATCH.logical_x:
+    logical_y = patch.logical_x * patch.logical_z
+    if pauli == patch.logical_x:
         return f"{text}  (X_L)"
     if pauli == logical_y:
         return f"{text}  (Y_L)"
-    if pauli == PATCH.logical_z:
+    if pauli == patch.logical_z:
         return f"{text}  (Z_L)"
     return text
 
 
-def _plain_pauli(pauli: Pauli) -> str:
-    return format_pauli(pauli).split("  (", 1)[0]
+def _plain_pauli(pauli: Pauli, *, patch: HeavyHexPatch = PATCH) -> str:
+    return format_pauli(pauli, patch=patch).split("  (", 1)[0]
 
 
-def _check_names() -> tuple[str, ...]:
-    counters = {"X": 0, "Z": 0}
-    names: list[str] = []
-    for check in PATCH.checks:
-        names.append(f"{check.basis}-check {counters[check.basis]}")
-        counters[check.basis] += 1
-    return tuple(names)
+def _check_names(*, patch: HeavyHexPatch = PATCH) -> tuple[str, ...]:
+    return tuple(
+        (
+            f"{basis}-stabilizer {i}"
+            for basis, checks in (("X", patch.x_stabilizers), ("Z", patch.z_stabilizers))
+            for i in range(len(checks))
+        )
+    )
 
 
-def _validate_syndrome(syndrome: Syndrome) -> None:
-    validate_binary_bits("syndrome", syndrome, PATCH.code.syndrome_size)
+def _validate_syndrome(syndrome: Syndrome, *, patch: HeavyHexPatch = PATCH) -> None:
+    validate_binary_bits("syndrome", syndrome, patch.code.syndrome_size)
 
 
-def format_syndrome(syndrome: Syndrome) -> str:
-    _validate_syndrome(syndrome)
-    fired = [name for name, bit in zip(_check_names(), syndrome) if bit]
-    bits = "".join(str(bit) for bit in syndrome)
-    grouped = f"{bits[:4]} {bits[4:]}"
+def format_syndrome(syndrome: Syndrome, *, patch: HeavyHexPatch = PATCH) -> str:
+    _validate_syndrome(syndrome, patch=patch)
+    fired = [name for name, bit in zip(_check_names(patch=patch), syndrome) if bit]
+    bits = "".join((str(bit) for bit in syndrome))
+    split = len(patch.x_stabilizers)
+    grouped = f"{bits[:split]} {bits[split:]}"
     if not fired:
         return f"{grouped}  (trivial)"
     return f"{grouped}  ({', '.join(fired)})"
 
 
-def _logical_class(error: Pauli, correction: Pauli) -> str:
+def _logical_class(error: Pauli, correction: Pauli, *, patch: HeavyHexPatch = PATCH) -> str:
     residual = correction * error
     representatives = (
         ("I_L", Pauli()),
-        ("X_L", PATCH.logical_x),
-        ("Y_L", PATCH.logical_x * PATCH.logical_z),
-        ("Z_L", PATCH.logical_z),
+        ("X_L", patch.logical_x),
+        ("Y_L", patch.logical_x * patch.logical_z),
+        ("Z_L", patch.logical_z),
     )
     for label, representative in representatives:
-        if PATCH.code.in_stabilizer_group(residual * representative):
+        if patch.code.in_gauge_group(residual * representative):
             return label
     return "unknown"
 
 
-def _summarize_tallies(tallies: Tallies) -> dict[str, Any]:
+def _summarize_tallies(tallies: Tallies, *, patch: HeavyHexPatch = PATCH) -> dict[str, Any]:
     if not tallies:
         raise ValueError("simulator returned no outcomes")
     by_syndrome: dict[Syndrome, int] = {}
     survived = 0
     outcomes: list[dict[str, Any]] = []
     for (syndrome, data), count in tallies.items():
-        _validate_syndrome(syndrome)
-        validate_binary_bits("data result", data, len(PATCH.data_qubits))
+        _validate_syndrome(syndrome, patch=patch)
+        validate_binary_bits("data result", data, len(patch.data_qubits))
         if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
             raise ValueError(f"outcome count must be a positive integer, got {count!r}")
-        success = shot_z_success(syndrome, data)
+        success = shot_z_success(syndrome, data, patch=patch)
         by_syndrome[syndrome] = by_syndrome.get(syndrome, 0) + count
         survived += count * success
         outcomes.append(
@@ -163,8 +145,10 @@ def _summarize_tallies(tallies: Tallies) -> dict[str, Any]:
     }
 
 
-def format_report(tallies: Tallies, error: Pauli, *, show_counts: bool = False) -> str:
-    summary = _summarize_tallies(tallies)
+def format_report(
+    tallies: Tallies, error: Pauli, *, show_counts: bool = False, patch: HeavyHexPatch = PATCH
+) -> str:
+    summary = _summarize_tallies(tallies, patch=patch)
     shots = summary["shots"]
     survived = summary["decoded_z_plus"]
     syndrome = summary["dominant_syndrome"]
@@ -175,13 +159,13 @@ def format_report(tallies: Tallies, error: Pauli, *, show_counts: bool = False) 
     else:
         logical_z = f"mixed ({survived}/{shots} at +1)"
     shot_word = "shot" if shots == 1 else "shots"
-    correction = decode(syndrome)
+    correction = decode(syndrome, code=patch.code)
     lines = [
-        "Backend:      Aer stabilizer (ideal circuit)",
-        f"Error:        {format_pauli(error)}",
-        f"Syndrome:     {format_syndrome(syndrome)}",
-        f"Correction:   {format_pauli(correction)}",
-        f"Residual logical:  {_logical_class(error, correction)}",
+        "Backend:      Aer stabilizer (ideal heavy-hex gauges)",
+        f"Error:        {format_pauli(error, patch=patch)}",
+        f"Syndrome:     {format_syndrome(syndrome, patch=patch)}",
+        f"Correction:   {format_pauli(correction, patch=patch)}",
+        f"Residual logical:  {_logical_class(error, correction, patch=patch)}",
         f"Decoded Z_L:  {logical_z}   ({shots} {shot_word})",
     ]
     if summary["syndrome_count"] > 1:
@@ -196,17 +180,22 @@ def format_report(tallies: Tallies, error: Pauli, *, show_counts: bool = False) 
     return "\n".join(lines)
 
 
-def _report_payload(tallies: Tallies, error: Pauli) -> dict[str, Any]:
-    summary = _summarize_tallies(tallies)
+def _report_payload(
+    tallies: Tallies, error: Pauli, *, patch: HeavyHexPatch = PATCH
+) -> dict[str, Any]:
+    summary = _summarize_tallies(tallies, patch=patch)
     syndrome = summary.pop("dominant_syndrome")
-    correction = decode(syndrome)
+    correction = decode(syndrome, code=patch.code)
     return {
         "backend": "aer_stabilizer",
         "circuit_noise": "none",
-        "error": _plain_pauli(error),
+        "distance": patch.distance,
+        "code": "heavy_hex",
+        "model": "ideal_direct_gauges",
+        "error": _plain_pauli(error, patch=patch),
         "syndrome": "".join(map(str, syndrome)),
-        "correction": _plain_pauli(correction),
-        "residual_logical": _logical_class(error, correction),
+        "correction": _plain_pauli(correction, patch=patch),
+        "residual_logical": _logical_class(error, correction, patch=patch),
         **summary,
     }
 
@@ -218,33 +207,35 @@ def _combined_error(primary: Pauli, extras: Sequence[Pauli]) -> Pauli:
     return result
 
 
-def _call_aer(error: Pauli, *, shots: int, seed: int | None) -> Tallies:
+def _call_aer(
+    error: Pauli, *, shots: int, seed: int | None, patch: HeavyHexPatch = PATCH
+) -> Tallies:
     if seed is None:
-        return run_aer(error, shots=shots)
-    return run_aer(error, shots=shots, seed=seed)
+        return run_aer(error, shots=shots, patch=patch)
+    return run_aer(error, shots=shots, seed=seed, patch=patch)
 
 
-def _run_command(args: argparse.Namespace) -> int:
-    initial = _combined_error(args.error, (args.extra_errors or ()))
+def _run_command(args: argparse.Namespace, *, patch: HeavyHexPatch = PATCH) -> int:
+    initial = _combined_error(args.error, args.extra_errors or ())
     frame = initial
     probability = 0.0 if args.noise is None else args.noise
     steps = int(args.noise is not None) if args.steps is None else args.steps
     rng = random.Random(args.seed)
     sampled = Pauli()
     for _ in range(steps):
-        draw = depolarizing_error(probability, PATCH.data_qubits, rng)
+        draw = depolarizing_error(probability, patch.data_qubits, rng)
         sampled = sampled * draw
         frame = frame * draw
-    tallies = _call_aer(frame, shots=args.shots, seed=args.seed)
+    tallies = _call_aer(frame, shots=args.shots, seed=args.seed, patch=patch)
     if args.json:
-        payload = _report_payload(tallies, frame)
+        payload = _report_payload(tallies, frame, patch=patch)
         payload.update(
             {
-                "initial_error": _plain_pauli(initial),
+                "initial_error": _plain_pauli(initial, patch=patch),
                 "random_error_draw": {
                     "probability": probability,
                     "draws": steps,
-                    "sampled_error": _plain_pauli(sampled),
+                    "sampled_error": _plain_pauli(sampled, patch=patch),
                 },
                 "seed": args.seed,
             }
@@ -255,75 +246,79 @@ def _run_command(args: argparse.Namespace) -> int:
     else:
         if steps:
             print(
-                f"Random error: p={probability:g}, draws={steps}, seed={args.seed}, "
-                f"sampled={_plain_pauli(sampled)} (fixed across shots)"
+                f"Random error: p={probability:g}, draws={steps}, seed={args.seed}, sampled={_plain_pauli(sampled, patch=patch)} (fixed across shots)"
             )
-        print(format_report(tallies, frame, show_counts=args.counts))
+        print(format_report(tallies, frame, show_counts=args.counts, patch=patch))
     return 0
 
 
-def _syndrome_payload(error: Pauli) -> dict[str, Any]:
-    syndrome = PATCH.code.syndrome(error)
-    correction = decode(syndrome)
+def _syndrome_payload(error: Pauli, *, patch: HeavyHexPatch = PATCH) -> dict[str, Any]:
+    syndrome = patch.code.syndrome(error)
+    correction = decode(syndrome, code=patch.code)
     return {
-        "error": _plain_pauli(error),
+        "error": _plain_pauli(error, patch=patch),
+        "distance": patch.distance,
         "syndrome": "".join(map(str, syndrome)),
-        "fired_checks": [name for name, bit in zip(_check_names(), syndrome) if bit],
-        "correction": _plain_pauli(correction),
-        "residual_logical": _logical_class(error, correction),
-        "decoded_z_success": bool(z_basis_success(error)),
+        "fired_checks": [name for name, bit in zip(_check_names(patch=patch), syndrome) if bit],
+        "correction": _plain_pauli(correction, patch=patch),
+        "residual_logical": _logical_class(error, correction, patch=patch),
+        "decoded_z_success": bool(z_basis_success(error, code=patch.code)),
     }
 
 
-def _syndrome_command(args: argparse.Namespace) -> int:
-    payload = _syndrome_payload(args.error)
+def _syndrome_command(args: argparse.Namespace, *, patch: HeavyHexPatch = PATCH) -> int:
+    payload = _syndrome_payload(args.error, patch=patch)
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
-        syndrome = parse_syndrome(payload["syndrome"])
-        print(f"Error:        {format_pauli(args.error)}")
-        print(f"Syndrome:     {format_syndrome(syndrome)}")
-        print(f"Correction:   {format_pauli(decode(syndrome))}")
+        syndrome = parse_syndrome(payload["syndrome"], patch=patch)
+        print(f"Error:        {format_pauli(args.error, patch=patch)}")
+        print(f"Syndrome:     {format_syndrome(syndrome, patch=patch)}")
+        print(f"Correction:   {format_pauli(decode(syndrome, code=patch.code), patch=patch)}")
         print(f"Residual logical:  {payload['residual_logical']}")
-        print(f"Decoded Z_L:  {'+1' if payload['decoded_z_success'] else '-1'}")
+        print(f"Decoded Z_L:  {('+1' if payload['decoded_z_success'] else '-1')}")
     return 0
 
 
-def _decode_command(args: argparse.Namespace) -> int:
-    correction = decode(args.syndrome)
+def _decode_command(args: argparse.Namespace, *, patch: HeavyHexPatch = PATCH) -> int:
+    correction = decode(args.syndrome, code=patch.code)
     payload = {
+        "distance": patch.distance,
         "syndrome": "".join(map(str, args.syndrome)),
-        "fired_checks": [name for name, bit in zip(_check_names(), args.syndrome) if bit],
-        "correction": _plain_pauli(correction),
+        "fired_checks": [
+            name for name, bit in zip(_check_names(patch=patch), args.syndrome) if bit
+        ],
+        "correction": _plain_pauli(correction, patch=patch),
         "weight": correction.weight(),
     }
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
-        print(f"Syndrome:    {format_syndrome(args.syndrome)}")
-        print(f"Correction:  {format_pauli(correction)}")
+        print(f"Syndrome:    {format_syndrome(args.syndrome, patch=patch)}")
+        print(f"Correction:  {format_pauli(correction, patch=patch)}")
         print(f"Weight:      {correction.weight()}")
     return 0
 
 
-def _errors_of_weight(weight: int, axes: str) -> Iterator[Pauli]:
-    for qubits in combinations(PATCH.data_qubits, weight):
+def _errors_of_weight(weight: int, axes: str, *, patch: HeavyHexPatch = PATCH) -> Iterator[Pauli]:
+    for qubits in combinations(patch.data_qubits, weight):
         for chosen_axes in product(axes, repeat=weight):
-            text = " ".join(f"{axis}{qubit}" for axis, qubit in zip(chosen_axes, qubits))
-            yield parse_error(text)
+            text = " ".join((f"{axis}{qubit}" for axis, qubit in zip(chosen_axes, qubits)))
+            yield parse_error(text, patch=patch)
 
 
-def _sweep_command(args: argparse.Namespace) -> int:
+def _sweep_command(args: argparse.Namespace, *, patch: HeavyHexPatch = PATCH) -> int:
     rows: list[dict[str, Any]] = []
     classes = {"I_L": 0, "X_L": 0, "Y_L": 0, "Z_L": 0, "unknown": 0}
     successes = 0
-    for error in _errors_of_weight(args.weight, args.axes):
-        payload = _syndrome_payload(error)
+    for error in _errors_of_weight(args.weight, args.axes, patch=patch):
+        payload = _syndrome_payload(error, patch=patch)
         classes[payload["residual_logical"]] += 1
         successes += int(payload["decoded_z_success"])
         rows.append(payload)
     failures = len(rows) - successes
     result = {
+        "distance": patch.distance,
         "weight": args.weight,
         "axes": args.axes,
         "total": len(rows),
@@ -339,12 +334,11 @@ def _sweep_command(args: argparse.Namespace) -> int:
             result.pop("cases")
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
-
     print(f"Ideal Pauli sweep: weight={args.weight}, axes={args.axes}")
     print(f"Cases:              {len(rows)}")
     print(f"Decoded Z_L +1:     {successes}")
     print(f"Decoded Z_L -1:     {failures}")
-    class_summary = ", ".join(f"{key}={value}" for key, value in classes.items() if value)
+    class_summary = ", ".join((f"{key}={value}" for key, value in classes.items() if value))
     print(f"Residual logical:   {class_summary}")
     if args.details or args.failures_only:
         print("\nerror       syndrome  correction  residual  Z_L")
@@ -354,68 +348,87 @@ def _sweep_command(args: argparse.Namespace) -> int:
         for row in selected:
             eigenvalue = "+1" if row["decoded_z_success"] else "-1"
             print(
-                f"{row['error']:<11} {row['syndrome']}  {row['correction']:<10} "
-                f"{row['residual_logical']:<8}  {eigenvalue}"
+                f"{row['error']:<11} {row['syndrome']}  {row['correction']:<10} {row['residual_logical']:<8}  {eigenvalue}"
             )
     return 0
 
 
-def _info_payload() -> dict[str, Any]:
-    grid = [
-        list(PATCH.data_qubits[row * PATCH.distance : (row + 1) * PATCH.distance])
-        for row in range(PATCH.distance)
-    ]
-    counters = {"X": 0, "Z": 0}
-    checks: list[dict[str, Any]] = []
-    for check in PATCH.checks:
-        checks.append(
-            {
-                "name": f"{check.basis}-check {counters[check.basis]}",
-                "basis": check.basis,
-                "ancilla": check.ancilla,
-                "data_qubits": sorted(check.support),
-            }
-        )
-        counters[check.basis] += 1
+def _info_payload(*, patch: HeavyHexPatch = PATCH) -> dict[str, Any]:
+    layout = get_fez_layout(patch.distance)
     return {
-        "parameters": {"n": len(PATCH.data_qubits), "k": 1, "distance": PATCH.distance},
-        "data_qubit_grid": grid,
-        "ancillas": list(PATCH.ancillas),
-        "logical_x": _plain_pauli(PATCH.logical_x),
-        "logical_z": _plain_pauli(PATCH.logical_z),
-        "checks": checks,
+        "code": "heavy_hex",
+        "parameters": {
+            "n": len(patch.data_qubits),
+            "k": 1,
+            "r": patch.code.gauge_qubits,
+            "distance": patch.distance,
+        },
+        "data_qubit_grid": [
+            [patch.data_qubit(row, col) for col in range(patch.distance)]
+            for row in range(patch.distance)
+        ],
+        "ancillas": list(patch.ancillas),
+        "relays": list(patch.relays),
+        "physical_qubit_count": patch.num_qubits,
+        "logical_x": _plain_pauli(patch.logical_x, patch=patch),
+        "logical_z": _plain_pauli(patch.logical_z, patch=patch),
+        "gauges": [
+            {
+                "name": g.name,
+                "basis": g.basis,
+                "ancilla": g.ancilla,
+                "data_qubits": sorted(g.support),
+            }
+            for g in patch.gauges
+        ],
+        "stabilizers": [
+            {"name": name, "operator": _plain_pauli(s, patch=patch), "gauge_indices": list(indices)}
+            for name, s, indices in zip(
+                _check_names(patch=patch), patch.stabilizers, patch.stabilizer_gauge_indices
+            )
+        ],
+        "fez_layout": {
+            "source": "cached connectivity; no account queries",
+            "status": "connectivity validated; hardware gate schedule pending",
+            "local_to_physical": layout.local_to_physical,
+        },
     }
 
 
-def format_info() -> str:
-    payload = _info_payload()
+def format_info(*, patch: HeavyHexPatch = PATCH) -> str:
+    payload = _info_payload(patch=patch)
+    p = payload["parameters"]
     lines = [
-        "[[9,1,3]] rotated planar surface code",
+        f"[[{p['n']},1,{p['r']},{p['distance']}]] heavy-hex subsystem code",
+        f"Fez layout: {patch.num_qubits} sites, including {len(patch.relays)} boundary relays",
         "",
-        "Data-qubit grid:",
-        *("  " + "  ".join(str(qubit) for qubit in row) for row in payload["data_qubit_grid"]),
+        "Data-qubit grid (Q labels, column-major):",
+        *("  " + "  ".join((str(q) for q in row)) for row in payload["data_qubit_grid"]),
         "",
         f"Logical X:  {payload['logical_x']}",
         f"Logical Z:  {payload['logical_z']}",
         "",
-        "Checks:",
+        f"Gauges ({len(patch.gauges)} measurements in the ideal circuit):",
     ]
-    for check in payload["checks"]:
-        support = ", ".join(map(str, check["data_qubits"]))
-        lines.append(f"  {check['name']:<10} ancilla {check['ancilla']}: [{support}]")
+    for gauge in payload["gauges"]:
+        lines.append(f"  {gauge['name']:<24} local ancilla Q{gauge['ancilla']}")
+    lines.extend(("", f"Stabilizers ({patch.code.syndrome_size} inferred bits, X then Z):"))
+    for stabilizer in payload["stabilizers"]:
+        lines.append(f"  {stabilizer['name']:<18} {stabilizer['operator']}")
+    lines.extend(("", "Simulation: ideal direct gauge interactions; Fez gate schedule pending."))
     return "\n".join(lines)
 
 
-def _info_command(args: argparse.Namespace) -> int:
+def _info_command(args: argparse.Namespace, *, patch: HeavyHexPatch = PATCH) -> int:
     if args.json:
-        print(json.dumps(_info_payload(), indent=2, sort_keys=True))
+        print(json.dumps(_info_payload(patch=patch), indent=2, sort_keys=True))
     else:
-        print(format_info())
+        print(format_info(patch=patch))
     return 0
 
 
-def _circuit_command(args: argparse.Namespace) -> int:
-    print(to_qiskit(args.error).draw(output="text"))
+def _circuit_command(args: argparse.Namespace, *, patch: HeavyHexPatch = PATCH) -> int:
+    print(to_qiskit(args.error, patch=patch).draw(output="text"))
     return 0
 
 
@@ -447,12 +460,22 @@ def _interactive_measure(
     seed: int | None,
     *,
     counts: bool = False,
+    patch: HeavyHexPatch = PATCH,
 ) -> None:
     print()
-    print(format_report(_call_aer(frame, shots=shots, seed=seed), frame, show_counts=counts))
+    print(
+        format_report(
+            _call_aer(frame, shots=shots, seed=seed, patch=patch),
+            frame,
+            show_counts=counts,
+            patch=patch,
+        )
+    )
 
 
-def _interactive_command(args: argparse.Namespace, lines: Sequence[str] | None) -> int:
+def _interactive_command(
+    args: argparse.Namespace, lines: Sequence[str] | None, *, patch: HeavyHexPatch = PATCH
+) -> int:
     cursor = [0]
     frame = Pauli()
     noise_probability = args.noise
@@ -461,14 +484,20 @@ def _interactive_command(args: argparse.Namespace, lines: Sequence[str] | None) 
     rng = random.Random(args.seed)
     initial_rng_state = rng.getstate()
     history: list[tuple[Pauli, int, tuple[Any, ...]]] = []
-
-    print("[[9,1,3]] rotated surface-code error explorer")
+    print(f"d={patch.distance} heavy-hex error explorer")
     print("Aer circuit: ideal; optional draws inject a random data Pauli once.")
     print("Data qubits:")
-    print("  0  1  2\n  3  4  5\n  6  7  8\n")
+    print(
+        "\n".join(
+            (
+                "  " + "  ".join((str(patch.data_qubit(row, col)) for col in range(patch.distance)))
+                for row in range(patch.distance)
+            )
+        )
+    )
     _print_menu()
     while True:
-        status = f"draws={draw_count} rate={noise_probability:g} shots={shots} error={_plain_pauli(frame)}"
+        status = f"draws={draw_count} rate={noise_probability:g} shots={shots} error={_plain_pauli(frame, patch=patch)}"
         prompt = f"\n[{status}] > "
         try:
             raw = _read(prompt, lines, cursor).strip()
@@ -493,12 +522,12 @@ def _interactive_command(args: argparse.Namespace, lines: Sequence[str] | None) 
                 continue
             if command in {"show", "state"}:
                 _reject_extra(command, rest)
-                print(f"Injected error: {format_pauli(frame)}")
+                print(f"Injected error: {format_pauli(frame, patch=patch)}")
                 continue
             if command in {"r", "reset", "clear"}:
                 _reject_extra(command, rest)
                 history.append((frame, draw_count, rng.getstate()))
-                frame, draw_count = Pauli(), 0
+                frame, draw_count = (Pauli(), 0)
                 rng.setstate(initial_rng_state)
                 print("Injected error and draw counter cleared.")
                 continue
@@ -509,7 +538,7 @@ def _interactive_command(args: argparse.Namespace, lines: Sequence[str] | None) 
                 else:
                     frame, draw_count, rng_state = history.pop()
                     rng.setstate(rng_state)
-                    print(f"Injected error: {format_pauli(frame)}")
+                    print(f"Injected error: {format_pauli(frame, patch=patch)}")
                 continue
             if command in {"s", "shots"}:
                 value = rest or _read(f"shots [{shots}]: ", lines, cursor).strip()
@@ -526,26 +555,28 @@ def _interactive_command(args: argparse.Namespace, lines: Sequence[str] | None) 
             if command in {"t", "step", "d", "draw"}:
                 _reject_extra(command, rest)
                 history.append((frame, draw_count, rng.getstate()))
-                injected = depolarizing_error(noise_probability, PATCH.data_qubits, rng)
+                injected = depolarizing_error(noise_probability, patch.data_qubits, rng)
                 frame = frame * injected
                 draw_count += 1
-                print(f"Random draw:    {format_pauli(injected)}")
-                print(f"Injected error: {format_pauli(frame)}")
+                print(f"Random draw:    {format_pauli(injected, patch=patch)}")
+                print(f"Injected error: {format_pauli(frame, patch=patch)}")
                 continue
             if command in {"5", "m", "measure"}:
                 if rest.lower() not in {"", "counts"}:
                     raise ValueError("measure accepts only the optional argument 'counts'")
                 try:
-                    _interactive_measure(frame, shots, args.seed, counts=rest.lower() == "counts")
+                    _interactive_measure(
+                        frame, shots, args.seed, counts=rest.lower() == "counts", patch=patch
+                    )
                 except ImportError as error:
                     if not _missing_qiskit(error):
                         raise
                     _print_qiskit_help()
                 continue
             if command in {"c", "circuit"}:
-                target = frame if not rest else parse_error(rest)
+                target = frame if not rest else parse_error(rest, patch=patch)
                 try:
-                    print(to_qiskit(target).draw(output="text"))
+                    print(to_qiskit(target, patch=patch).draw(output="text"))
                 except ImportError as error:
                     if not _missing_qiskit(error):
                         raise
@@ -553,34 +584,41 @@ def _interactive_command(args: argparse.Namespace, lines: Sequence[str] | None) 
                 continue
             if command in {"i", "info"}:
                 _reject_extra(command, rest)
-                print(format_info())
+                print(format_info(patch=patch))
                 continue
-
             edit: Pauli
             if command in {"1", "2", "6"}:
                 axis = {"1": "X", "2": "Z", "6": "Y"}[command]
-                qubit = parse_data_qubit(rest or _read("data qubit (0-8): ", lines, cursor).strip())
-                edit = parse_error(f"{axis}{qubit}")
+                qubit = parse_data_qubit(
+                    rest
+                    or _read(f"data qubit (1-{len(patch.data_qubits)}): ", lines, cursor).strip(),
+                    patch=patch,
+                )
+                edit = parse_error(f"{axis}{qubit}", patch=patch)
             elif command in {"x", "y", "z"}:
-                qubit = parse_data_qubit(rest or _read("data qubit (0-8): ", lines, cursor).strip())
-                edit = parse_error(f"{command}{qubit}")
+                qubit = parse_data_qubit(
+                    rest
+                    or _read(f"data qubit (1-{len(patch.data_qubits)}): ", lines, cursor).strip(),
+                    patch=patch,
+                )
+                edit = parse_error(f"{command}{qubit}", patch=patch)
             elif command in {"3", "xl"}:
                 _reject_extra(command, rest)
-                edit = PATCH.logical_x
+                edit = patch.logical_x
             elif command in {"4", "zl"}:
                 _reject_extra(command, rest)
-                edit = PATCH.logical_z
+                edit = patch.logical_z
             elif command == "yl":
                 _reject_extra(command, rest)
-                edit = PATCH.logical_x * PATCH.logical_z
+                edit = patch.logical_x * patch.logical_z
             elif command in {"a", "add", "pauli"}:
                 expression = rest or _read("Pauli: ", lines, cursor)
-                edit = parse_error(expression)
+                edit = parse_error(expression, patch=patch)
             else:
-                edit = parse_error(raw)
+                edit = parse_error(raw, patch=patch)
             history.append((frame, draw_count, rng.getstate()))
             frame = frame * edit
-            print(f"Injected error: {format_pauli(frame)}")
+            print(f"Injected error: {format_pauli(frame, patch=patch)}")
         except (ValueError, argparse.ArgumentTypeError) as error:
             print(f"Error: {error}", file=sys.stderr)
         except EOFError:
@@ -588,7 +626,7 @@ def _interactive_command(args: argparse.Namespace, lines: Sequence[str] | None) 
             return 0
 
 
-def _normalized_argv(argv: Sequence[str]) -> list[str]:
+def _normalized_argv(argv: Sequence[str], *, patch: HeavyHexPatch = PATCH) -> list[str]:
     raw = list(argv)
     if not raw:
         return ["interactive"]
@@ -603,14 +641,14 @@ def _normalized_argv(argv: Sequence[str]) -> list[str]:
     if _looks_like_pauli(raw[0]):
         return ["run", *raw]
     try:
-        parse_error(raw[0])
+        parse_error(raw[0], patch=patch)
     except ValueError:
         return raw
     return ["run", *raw]
 
 
 def _looks_like_pauli(text: str) -> bool:
-    return bool(re.match(r"(?:I$|[XYZ]|LOGICAL)", text, re.IGNORECASE))
+    return bool(re.match("(?:I$|[XYZ]|LOGICAL)", text, re.IGNORECASE))
 
 
 def _missing_qiskit(error: ImportError) -> bool:
@@ -628,12 +666,18 @@ def main(argv: list[str] | None = None, *, lines: Sequence[str] | None = None) -
         raw_argv = []
     else:
         raw_argv = sys.argv[1:] if argv is None else argv
-    parser = build_parser()
+    selector = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    selector.add_argument("--distance", type=int, choices=(3, 5), default=3)
     try:
-        args = parser.parse_args(_normalized_argv(raw_argv))
+        selected, remaining = selector.parse_known_args(raw_argv)
     except SystemExit as error:
         return int(error.code)
-
+    patch = get_patch(selected.distance)
+    parser = build_parser(patch=patch)
+    try:
+        args = parser.parse_args(_normalized_argv(remaining, patch=patch))
+    except SystemExit as error:
+        return int(error.code)
     handlers = {
         "run": _run_command,
         "syndrome": _syndrome_command,
@@ -644,8 +688,8 @@ def main(argv: list[str] | None = None, *, lines: Sequence[str] | None = None) -
     }
     try:
         if args.command == "interactive":
-            return _interactive_command(args, lines)
-        return handlers[args.command](args)
+            return _interactive_command(args, lines, patch=patch)
+        return handlers[args.command](args, patch=patch)
     except ValueError as error:
         print(f"Error: {error}", file=sys.stderr)
         return 2

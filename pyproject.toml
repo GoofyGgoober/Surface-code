@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "quantum-surface-code"
 version = "0.1.0"
-description = "Distance-3 rotated planar surface code (built from scratch)"
+description = "Distance-3 and distance-5 heavy-hex subsystem codes"
 readme = "README.md"
 requires-python = ">=3.10"
 
@@ -19,6 +19,9 @@ dev = ["quantum-surface-code[sim,test]", "ruff>=0.16,<0.17"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"surface_code.layouts" = ["fez_map.json"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

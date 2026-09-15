@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from surface_code import Pauli
-from surface_code.patches import PATCH
+from surface_code.patches import PATCH, get_patch
 from surface_code.simulation.cli import (
     MENU,
     format_info,
@@ -19,7 +19,7 @@ from surface_code.simulation.cli import (
     parse_syndrome,
 )
 
-ZERO_SYNDROME = (0,) * 8
+ZERO_SYNDROME = (0,) * 6
 ZERO_DATA = (0,) * 9
 
 
@@ -30,35 +30,35 @@ def _fake_tallies(shots: int):
 def test_parse_error_supports_physical_logical_and_separators():
     assert parse_error("") == Pauli()
     assert parse_error("I") == Pauli()
-    assert parse_error("x0") == Pauli.x_on((0,))
+    assert parse_error("x1") == Pauli.x_on((1,))
     assert parse_error("Y4") == Pauli.x_on((4,)) * Pauli.z_on((4,))
-    assert parse_error("X0, Z3") == Pauli.x_on((0,)) * Pauli.z_on((3,))
+    assert parse_error("X1, Z3") == Pauli.x_on((1,)) * Pauli.z_on((3,))
     assert parse_error("XL") == PATCH.logical_x
     assert parse_error("logical-z") == PATCH.logical_z
     assert parse_error("YL") == PATCH.logical_x * PATCH.logical_z
 
 
 def test_parse_error_composes_repeated_tokens():
-    assert parse_error("X0 X0") == Pauli()
-    assert parse_error("X0 Z0") == Pauli.x_on((0,)) * Pauli.z_on((0,))
-    assert parse_error("Y0 X0") == Pauli.z_on((0,))
+    assert parse_error("X1 X1") == Pauli()
+    assert parse_error("X1 Z1") == Pauli.x_on((1,)) * Pauli.z_on((1,))
+    assert parse_error("Y1 X1") == Pauli.z_on((1,))
 
 
-@pytest.mark.parametrize("text", ["X9", "Z-1", "A0", "X", "X0 garbage"])
+@pytest.mark.parametrize("text", ["X10", "Z-1", "A0", "X", "X1 garbage"])
 def test_parse_error_rejects_invalid_expressions(text):
     with pytest.raises(ValueError):
         parse_error(text)
 
 
 def test_parse_and_format_syndrome():
-    syndrome = (0, 0, 0, 0, 1, 1, 0, 0)
-    assert parse_syndrome("0000 1100") == syndrome
-    assert "Z-check 0" in format_syndrome(syndrome)
-    assert format_syndrome(ZERO_SYNDROME) == "0000 0000  (trivial)"
+    syndrome = (0, 0, 0, 0, 1, 1)
+    assert parse_syndrome("0000 11") == syndrome
+    assert "Z-stabilizer 0" in format_syndrome(syndrome)
+    assert format_syndrome(ZERO_SYNDROME) == "0000 00  (trivial)"
     with pytest.raises(ValueError):
         parse_syndrome("000")
     with pytest.raises(ValueError):
-        format_syndrome((0, 2) + (0,) * 6)
+        format_syndrome((0, 2) + (0,) * 4)
 
 
 def test_menu_exposes_edit_measure_and_inspection_commands():
@@ -70,20 +70,20 @@ def test_menu_exposes_edit_measure_and_inspection_commands():
 def test_format_pauli_and_info_are_readable():
     assert format_pauli(Pauli()) == "I"
     assert format_pauli(Pauli.x_on((4,))) == "X4"
-    assert format_pauli(PATCH.logical_x) == "X0 X3 X6  (X_L)"
+    assert format_pauli(PATCH.logical_x) == "X1 X2 X3  (X_L)"
     info = format_info()
-    assert "[[9,1,3]]" in info
-    assert "0  1  2" in info
-    assert "ancilla 9" in info
+    assert "[[9,1,2,3]]" in info
+    assert "1  4  7" in info
+    assert "ancilla Q10" in info
 
 
 def test_format_report_summarizes_and_can_show_counts():
     tallies = {
         (ZERO_SYNDROME, ZERO_DATA): 7,
-        (ZERO_SYNDROME, (0, 0, 0, 1, 0, 0, 0, 0, 0)): 3,
+        (ZERO_SYNDROME, (0, 1, 0, 0, 0, 0, 0, 0, 0)): 3,
     }
     report = format_report(tallies, Pauli(), show_counts=True)
-    assert "Aer stabilizer (ideal circuit)" in report
+    assert "Aer stabilizer (ideal heavy-hex gauges)" in report
     assert "Error:        I" in report
     assert "Decoded Z_L:  +1" in report
     assert "10 shots" in report
@@ -100,7 +100,7 @@ def test_format_report_rejects_empty_or_malformed_results():
 
 
 def test_format_report_breaks_syndrome_ties_deterministically():
-    other = (1,) + (0,) * 7
+    other = (1,) + (0,) * 5
     items = [((other, ZERO_DATA), 1), ((ZERO_SYNDROME, ZERO_DATA), 1)]
     assert format_report(dict(items), Pauli()) == format_report(dict(reversed(items)), Pauli())
 
@@ -128,7 +128,7 @@ def test_run_rejects_seed_above_aer_limit(capsys):
 def test_batch_run_passes_error_shots_and_seed(monkeypatch, capsys):
     seen = []
 
-    def fake_run(error, *, shots, seed):
+    def fake_run(error, *, shots, seed, patch):
         seen.append((error, shots, seed))
         return _fake_tallies(shots)
 
@@ -143,7 +143,7 @@ def test_batch_run_passes_error_shots_and_seed(monkeypatch, capsys):
 def test_batch_json_is_machine_readable(monkeypatch, capsys):
     monkeypatch.setattr(
         "surface_code.simulation.cli.run_aer",
-        lambda error, *, shots, seed: _fake_tallies(shots),
+        lambda error, *, shots, seed, patch: _fake_tallies(shots),
     )
     assert main(["run", "I", "--shots", "3", "--seed", "2", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
@@ -161,7 +161,7 @@ def test_nonzero_random_error_defaults_to_one_reproducible_draw(monkeypatch, cap
         draws.append((p, tuple(qubits), rng.random()))
         return Pauli.z_on((2,))
 
-    def fake_run(error, *, shots, seed):
+    def fake_run(error, *, shots, seed, patch):
         seen.append((error, shots, seed))
         return _fake_tallies(shots)
 
@@ -181,7 +181,7 @@ def test_nonzero_random_error_defaults_to_one_reproducible_draw(monkeypatch, cap
 def test_explicit_zero_probability_still_records_one_draw(monkeypatch, capsys):
     monkeypatch.setattr(
         "surface_code.simulation.cli.run_aer",
-        lambda error, shots: _fake_tallies(shots),
+        lambda error, shots, *, patch: _fake_tallies(shots),
     )
     assert main(["run", "--draw-error", "0", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
@@ -215,10 +215,15 @@ def test_algebraic_commands_do_not_need_aer(monkeypatch, capsys):
     )
     assert main(["syndrome", "X4"]) == 0
     assert "Correction:" in capsys.readouterr().out
-    assert main(["decode", "0000 0000", "--json"]) == 0
+    assert main(["decode", "0000 00", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["correction"] == "I"
     assert main(["info", "--json"]) == 0
-    assert json.loads(capsys.readouterr().out)["parameters"] == {"distance": 3, "k": 1, "n": 9}
+    assert json.loads(capsys.readouterr().out)["parameters"] == {
+        "distance": 3,
+        "k": 1,
+        "n": 9,
+        "r": 2,
+    }
 
 
 def test_sweep_reports_all_single_qubit_x_errors(capsys):
@@ -236,7 +241,7 @@ def test_circuit_command_uses_requested_error(monkeypatch, capsys):
 
     seen = []
 
-    def fake_to_qiskit(error):
+    def fake_to_qiskit(error, *, patch):
         seen.append(error)
         return FakeCircuit()
 
@@ -261,7 +266,7 @@ def test_format_report_rejects_boolean_counts():
 def test_interactive_edits_do_not_measure_until_requested(monkeypatch, capsys):
     seen = []
 
-    def fake_run(error, shots):
+    def fake_run(error, shots, *, patch):
         seen.append((error, shots))
         return _fake_tallies(shots)
 
@@ -274,7 +279,7 @@ def test_interactive_edits_do_not_measure_until_requested(monkeypatch, capsys):
 def test_interactive_undo_and_duplicate_edits(monkeypatch):
     seen = []
 
-    def fake_run(error, shots):
+    def fake_run(error, shots, *, patch):
         seen.append(error)
         return _fake_tallies(shots)
 
@@ -289,7 +294,7 @@ def test_interactive_reset_and_undo_restore_random_stream(monkeypatch, capsys):
     def fake_noise(p, qubits, rng):
         value = rng.random()
         draws.append(value)
-        return Pauli.x_on((0,)) if value < 0.5 else Pauli.z_on((0,))
+        return Pauli.x_on((1,)) if value < 0.5 else Pauli.z_on((1,))
 
     monkeypatch.setattr("surface_code.simulation.cli.depolarizing_error", fake_noise)
     lines = ["draw", "reset", "draw", "undo", "draw", "q"]
@@ -332,7 +337,7 @@ def test_interactive_random_draw_is_explicit_and_measured_separately(monkeypatch
         lambda p, qubits, rng=None: Pauli.z_on((3,)),
     )
 
-    def fake_run(error, shots):
+    def fake_run(error, shots, *, patch):
         seen.append(error)
         return _fake_tallies(shots)
 
@@ -357,7 +362,7 @@ def test_interactive_circuit_accepts_an_error_override(monkeypatch):
         def draw(self, *, output):
             return "circuit"
 
-    def fake_to_qiskit(error):
+    def fake_to_qiskit(error, *, patch):
         seen.append(error)
         return FakeCircuit()
 
@@ -385,7 +390,7 @@ def test_help_alias_and_command_typo(capsys):
 
 
 def test_malformed_pauli_shorthand_gets_a_pauli_error(capsys):
-    assert main(["X9"]) == 2
+    assert main(["X10"]) == 2
     error = capsys.readouterr().err
     assert "data qubit must be" in error
     assert "invalid choice" not in error
@@ -411,3 +416,72 @@ def test_library_value_errors_become_exit_code_2(monkeypatch, capsys):
     monkeypatch.setattr("surface_code.simulation.cli.run_aer", fail)
     assert main(["X4"]) == 2
     assert "no outcomes" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("distance", [3, 5])
+@pytest.mark.parametrize("position", ["before", "after"])
+def test_distance_selection_for_algebra_and_info(distance, position, capsys):
+    selection = ["--distance", str(distance)]
+    command = ["info", "--json"]
+    argv = selection + command if position == "before" else command + selection
+    assert main(argv) == 0
+    info = json.loads(capsys.readouterr().out)
+    assert info["parameters"]["distance"] == distance
+    assert info["physical_qubit_count"] == {3: 23, 5: 65}[distance]
+    assert len(info["stabilizers"]) == {3: 6, 5: 16}[distance]
+    assert main(["syndrome", f"X{distance**2}", *selection, "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["residual_logical"] == "I_L"
+
+
+def test_distance_five_parser_and_defaults_do_not_leak(capsys):
+    p = get_patch(5)
+    assert parse_error("X25", patch=p) == Pauli.x_on((25,))
+    assert parse_error("XL", patch=p) == p.logical_x
+    assert len(parse_syndrome("0" * 16, patch=p)) == 16
+    assert main(["--distance=5", "syndrome", "XL", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["residual_logical"] == "X_L"
+    assert main(["info", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["parameters"]["distance"] == 3
+    with pytest.raises(ValueError):
+        parse_error("X25")
+
+
+def test_d5_run_passes_the_selected_patch(monkeypatch, capsys):
+    seen = []
+
+    def fake_run(error, *, shots, seed, patch):
+        seen.append((error, patch.distance))
+        return {((0,) * 16, (0,) * 25): shots}
+
+    monkeypatch.setattr("surface_code.simulation.cli.run_aer", fake_run)
+    assert main(["--distance", "5", "X25", "--seed", "7", "--json"]) == 0
+    assert seen == [(Pauli.x_on((25,)), 5)]
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["distance"] == 5
+    assert len(payload["syndrome"]) == 16
+
+
+def test_interactive_distance_five_uses_selected_logical_and_labels(monkeypatch, capsys):
+    seen = []
+
+    def fake_run(error, *, shots, patch):
+        seen.append((error, patch.distance))
+        return {((0,) * 16, (0,) * 25): shots}
+
+    monkeypatch.setattr("surface_code.simulation.cli.run_aer", fake_run)
+    assert main(["--distance", "5"], lines=["x 25", "xl", "measure", "q"]) == 0
+    assert seen == [(Pauli.x_on((25,)) * get_patch(5).logical_x, 5)]
+    assert "d=5 heavy-hex" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("distance", ["2", "4", "3.0", "6", "nope"])
+def test_bad_distance_is_a_cli_error(distance, capsys):
+    assert main(["info", "--distance", distance]) == 2
+    assert capsys.readouterr().err
+
+
+def test_gauge_error_is_classified_as_harmless(capsys):
+    assert main(["syndrome", "X1 X4", "--json"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["syndrome"] == "000000"
+    assert result["residual_logical"] == "I_L"

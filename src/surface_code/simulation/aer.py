@@ -1,7 +1,8 @@
-"""Qiskit Aer backend: translate the patch circuit, run shots, parse counts.
+"""Local Aer stabilizer simulation of ideal heavy-hex gauge circuits.
 
-Qiskit is imported only when you call these functions so the rest of the
-package still runs without it.
+Qiskit indices are zero-based; public Q labels are one-based. The synthesized
+initial state and direct gauge interactions are an ideal baseline and are
+not compiled for Fez. No IBM services or QPU submission are used here.
 """
 
 from __future__ import annotations
@@ -9,136 +10,165 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .._validation import validate_binary_bits
-from ..circuits.operations import CX, H
-from ..circuits.syndrome import SYNDROME_CIRCUIT
+from ..circuits import CX, H, syndrome_circuit
 from ..core import Pauli
 from ..decoders import decode
 from ..decoders.basis import normalize_measurement_basis
-from ..patches import PATCH
+from ..patches import PATCH, HeavyHexPatch
 
 if TYPE_CHECKING:
-    from qiskit import ClassicalRegister, QuantumCircuit
+    from qiskit import QuantumCircuit
 
-NUM_QUBITS = max(PATCH.data_qubits + PATCH.ancillas) + 1
 MAX_SEED = (1 << 63) - 1
+Bits = tuple[int, ...]
+Tallies = dict[tuple[Bits, Bits], int]
 
 
-def _pauli_label(pauli: Pauli, n: int) -> str:
-    """Qiskit Pauli string: leftmost char is the highest-index qubit."""
-    chars = ["I"] * n
-    for qubit in pauli.x:
-        chars[qubit] = "Y" if qubit in pauli.z else "X"
-    for qubit in pauli.z:
-        if qubit not in pauli.x:
-            chars[qubit] = "Z"
+def _pauli_label(pauli: Pauli, patch: HeavyHexPatch) -> str:
+    chars = ["I"] * len(patch.data_qubits)
+    for i, qubit in enumerate(patch.data_qubits):
+        if qubit in pauli.x:
+            chars[i] = "Y" if qubit in pauli.z else "X"
+        elif qubit in pauli.z:
+            chars[i] = "Z"
     return "".join(reversed(chars))
 
 
-def _logical_state_circuit(basis: str = "Z") -> QuantumCircuit:
-    """Prepare the +1 logical eigenstate for ``basis`` from ``|0>^9``."""
+def _logical_state_circuit(patch: HeavyHexPatch, basis: str) -> QuantumCircuit:
     from qiskit.quantum_info import StabilizerState
 
+    # Fix the unprotected gauge degrees of freedom to obtain a pure state.
+    # Opposite-basis gauge measurements subsequently randomize those degrees
+    # of freedom while preserving all stabilizers and the protected logical.
+    if basis == "Z":
+        generators = tuple(g.pauli for g in patch.x_gauges) + patch.z_stabilizers
+        logical = patch.logical_z
+    else:
+        generators = patch.x_stabilizers + tuple(g.pauli for g in patch.z_gauges)
+        logical = patch.logical_x
+    labels = [_pauli_label(g, patch) for g in (*generators, logical)]
+    return StabilizerState.from_stabilizer_list(labels).clifford.to_circuit()
+
+
+def to_qiskit(
+    error: Pauli | None = None, *, patch: HeavyHexPatch = PATCH, basis: str = "Z"
+) -> QuantumCircuit:
+    """Prepare a +1 logical eigenstate, inject an error, measure gauges and data."""
     basis = normalize_measurement_basis(basis)
-    generators = [_pauli_label(s, len(PATCH.data_qubits)) for s in PATCH.stabilizers]
-    logical = PATCH.logical_x if basis == "X" else PATCH.logical_z
-    generators.append(_pauli_label(logical, len(PATCH.data_qubits)))
-    return StabilizerState.from_stabilizer_list(generators).clifford.to_circuit()
-
-
-def _apply_error(circuit: QuantumCircuit, error: Pauli) -> None:
-    PATCH.code.validate_data_pauli(error, name="error")
-    for qubit in error.x - error.z:
-        circuit.x(qubit)
-    for qubit in error.z - error.x:
-        circuit.z(qubit)
-    for qubit in error.x & error.z:
-        circuit.y(qubit)
-
-
-def _append_syndrome_round(circuit: QuantumCircuit, syn: ClassicalRegister) -> None:
-    """Append one check-extraction round into the supplied classical register."""
-    ancilla_bit = {ancilla: i for i, ancilla in enumerate(PATCH.ancillas)}
-    for op in SYNDROME_CIRCUIT:
-        if isinstance(op, H):
-            circuit.h(op.qubit)
-        elif isinstance(op, CX):
-            circuit.cx(op.control, op.target)
-        else:
-            circuit.measure(op.qubit, syn[ancilla_bit[op.qubit]])
-
-
-def to_qiskit(error: Pauli | None = None) -> QuantumCircuit:
-    """Syndrome round, then Z-measure the 9 data qubits."""
+    error = Pauli() if error is None else error
+    patch.code.validate_data_pauli(error, name="error")
     from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister
 
-    qubits = QuantumRegister(NUM_QUBITS, "q")
-    syn = ClassicalRegister(len(PATCH.ancillas), "syn")
-    data = ClassicalRegister(len(PATCH.data_qubits), "data")
-    circuit = QuantumCircuit(qubits, syn, data)
-    circuit.compose(_logical_state_circuit("Z"), PATCH.data_qubits, inplace=True)
-    if error is not None:
-        _apply_error(circuit, error)
-
-    _append_syndrome_round(circuit, syn)
-
-    # Data is still entangled with the ancillas until those measures finish.
+    qubits = QuantumRegister(patch.num_qubits, "q")
+    gauges = ClassicalRegister(len(patch.gauges), "gauges")
+    data = ClassicalRegister(len(patch.data_qubits), "data")
+    circuit = QuantumCircuit(qubits, gauges, data, name=f"heavy_hex_d{patch.distance}_{basis}")
+    circuit.metadata = {
+        "code": "heavy_hex",
+        "distance": patch.distance,
+        "basis": basis,
+        "model": "ideal_direct_gauges",
+        "hardware_compiled": False,
+        "data_labels": list(patch.data_qubits),
+        "gauge_names": [g.name for g in patch.gauges],
+    }
+    circuit.compose(
+        _logical_state_circuit(patch, basis), [q - 1 for q in patch.data_qubits], inplace=True
+    )
+    for q in sorted(error.x | error.z):
+        if q in error.x and q in error.z:
+            circuit.y(q - 1)
+        elif q in error.x:
+            circuit.x(q - 1)
+        else:
+            circuit.z(q - 1)
     circuit.barrier()
-    for i, qubit in enumerate(PATCH.data_qubits):
-        circuit.measure(qubit, data[i])
+    gauge_bit = {g.ancilla: i for i, g in enumerate(patch.gauges)}
+    for op in syndrome_circuit(patch):
+        if isinstance(op, H):
+            circuit.h(op.qubit - 1)
+        elif isinstance(op, CX):
+            circuit.cx(op.control - 1, op.target - 1)
+        else:
+            circuit.measure(op.qubit - 1, gauges[gauge_bit[op.qubit]])
+    circuit.barrier()
+    for i, q in enumerate(patch.data_qubits):
+        if basis == "X":
+            circuit.h(q - 1)
+        circuit.measure(q - 1, data[i])
     return circuit
 
 
-def _bits_le(bitstring: str) -> tuple[int, ...]:
-    """Qiskit prints a register with index 0 on the right."""
-    return tuple(int(bit) for bit in bitstring[::-1])
-
-
-def _parse_shot(key: str) -> tuple[tuple[int, ...], tuple[int, ...]]:
-    # get_counts prints the last-added register first: "data syn".
-    data_str, syn_str = key.split()
-    syndrome, data_bits = _bits_le(syn_str), _bits_le(data_str)
-    validate_binary_bits("syndrome", syndrome, len(PATCH.ancillas))
-    validate_binary_bits("data readout", data_bits, len(PATCH.data_qubits))
-    return syndrome, data_bits
+def _parse_shot(key: str, patch: HeavyHexPatch) -> tuple[Bits, Bits]:
+    # Last-added register is printed first, and each register is little endian.
+    data_str, gauge_str = key.split()
+    gauge_bits = tuple(int(bit) for bit in gauge_str[::-1])
+    data_bits = tuple(int(bit) for bit in data_str[::-1])
+    validate_binary_bits("gauge readout", gauge_bits, len(patch.gauges))
+    validate_binary_bits("data readout", data_bits, len(patch.data_qubits))
+    return gauge_bits, data_bits
 
 
 def _validate_aer_options(shots: int, seed: int | None) -> None:
-    if not isinstance(shots, int) or isinstance(shots, bool) or shots <= 0:
+    if type(shots) is not int or shots <= 0:
         raise ValueError(f"shots must be a positive integer, got {shots!r}")
-    if seed is not None and (
-        not isinstance(seed, int) or isinstance(seed, bool) or seed < 0 or seed > MAX_SEED
-    ):
+    if seed is not None and (type(seed) is not int or not 0 <= seed <= MAX_SEED):
         raise ValueError(f"seed must be an integer from 0 to {MAX_SEED}, or None, got {seed!r}")
+
+
+def run_gauge_aer(
+    error: Pauli | None = None,
+    *,
+    patch: HeavyHexPatch = PATCH,
+    basis: str = "Z",
+    shots: int = 1024,
+    seed: int | None = None,
+) -> Tallies:
+    """Return joint {(raw gauge bits, final data bits): count} for local shots."""
+    _validate_aer_options(shots, seed)
+    from qiskit_aer import AerSimulator
+
+    circuit = to_qiskit(error, patch=patch, basis=basis)
+    options = {"shots": shots}
+    if seed is not None:
+        options["seed_simulator"] = seed
+    result = AerSimulator(method="stabilizer").run(circuit, **options).result()
+    return {_parse_shot(key, patch): count for key, count in result.get_counts().items()}
 
 
 def run_aer(
     error: Pauli | None = None,
     *,
+    patch: HeavyHexPatch = PATCH,
+    basis: str = "Z",
     shots: int = 1024,
     seed: int | None = None,
-) -> dict[tuple[tuple[int, ...], tuple[int, ...]], int]:
-    """Return {(syndrome, data_bits): count} from a noiseless stabilizer sim."""
-    _validate_aer_options(shots, seed)
+) -> Tallies:
+    """Return {(derived stabilizer syndrome, final data bits): count}.
 
-    from qiskit_aer import AerSimulator
-
-    circuit = to_qiskit(error)
-    run_options: dict[str, int] = {"shots": shots}
-    if seed is not None:
-        run_options["seed_simulator"] = seed
-    result = AerSimulator(method="stabilizer").run(circuit, **run_options).result()
-    tallies: dict[tuple[tuple[int, ...], tuple[int, ...]], int] = {}
-    for key, count in result.get_counts().items():
-        parsed = _parse_shot(key)
-        tallies[parsed] = tallies.get(parsed, 0) + count
+    Use run_gauge_aer when the individual gauge outcomes are needed.
+    """
+    tallies: Tallies = {}
+    raw = run_gauge_aer(error, patch=patch, basis=basis, shots=shots, seed=seed)
+    for (gauges, data), count in raw.items():
+        key = patch.syndrome_from_gauges(gauges), data
+        tallies[key] = tallies.get(key, 0) + count
     return tallies
 
 
-def shot_z_success(syndrome: tuple[int, ...], data_bits: tuple[int, ...]) -> int:
-    """Hardware-shaped Z success: correct the data bits, then test Z_L == 0."""
-    validate_binary_bits("data readout", data_bits, len(PATCH.data_qubits))
-    correction = decode(syndrome)
-    bits = list(data_bits)
-    for qubit in correction.x:
-        bits[qubit] ^= 1
-    return int(sum(bits[qubit] for qubit in PATCH.logical_z.z) % 2 == 0)
+def shot_success(
+    syndrome: Bits, data_bits: Bits, *, patch: HeavyHexPatch = PATCH, basis: str = "Z"
+) -> int:
+    basis = normalize_measurement_basis(basis)
+    validate_binary_bits("data readout", data_bits, len(patch.data_qubits))
+    correction = decode(syndrome, patch.code)
+    flipped = correction.x if basis == "Z" else correction.z
+    support = patch.logical_z.z if basis == "Z" else patch.logical_x.x
+    parity = sum(
+        bit ^ (q in flipped) for q, bit in zip(patch.data_qubits, data_bits) if q in support
+    )
+    return int(parity % 2 == 0)
+
+
+def shot_z_success(syndrome: Bits, data_bits: Bits, *, patch: HeavyHexPatch = PATCH) -> int:
+    return shot_success(syndrome, data_bits, patch=patch, basis="Z")

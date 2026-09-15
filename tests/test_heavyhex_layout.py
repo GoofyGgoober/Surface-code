@@ -1,24 +1,25 @@
 """Offline checks for the documentation's two heavy-hex device layouts."""
 
-import importlib
 import json
 from collections import Counter
 from pathlib import Path
 
 import pytest
 
+from surface_code.layouts import build_layout, get_fez_layout, load_fez_map
+from surface_code.patches import get_patch
+
 FIGURES = Path(__file__).resolve().parents[1] / "docs" / "figures"
 
 
 @pytest.fixture
-def layout_builder(monkeypatch):
-    monkeypatch.syspath_prepend(str(FIGURES))
-    return importlib.import_module("heavyhex_layout").build_layout
+def layout_builder():
+    return build_layout
 
 
 @pytest.fixture
 def device_map():
-    return json.loads((FIGURES / "fez_map.json").read_text())
+    return load_fez_map()
 
 
 @pytest.fixture
@@ -112,7 +113,7 @@ def test_stabilizers_are_central_gauge_products_with_one_logical_qubit(layouts):
 
 @pytest.mark.parametrize("distance", [True, 2, 4, 5.0])
 def test_invalid_distance_is_rejected(layout_builder, device_map, distance):
-    with pytest.raises(ValueError, match="odd integer"):
+    with pytest.raises(ValueError, match="3 and 5"):
         layout_builder(
             distance, device_map["coords"], device_map["edges"], first_data_position=(3, 7)
         )
@@ -142,3 +143,16 @@ def test_saved_d5_manifest_matches_generated_layout(layouts):
         assert {name: tuple(support) for name, support in saved[field].items()} == getattr(
             patch, field
         )
+
+
+@pytest.mark.parametrize("distance", [3, 5])
+def test_public_layout_maps_every_local_role(distance):
+    p = get_patch(distance)
+    layout = get_fez_layout(distance)
+    assert set(layout.local_to_physical) == set(range(1, p.num_qubits + 1))
+    assert len(set(layout.initial_layout)) == p.num_qubits
+    for q in p.data_qubits:
+        assert layout.initial_layout[q - 1] == layout.data[q]
+    for g in p.gauges:
+        ancillas = layout.x_ancillas if g.basis == "X" else layout.z_ancillas
+        assert layout.initial_layout[g.ancilla - 1] == ancillas[g.name]
