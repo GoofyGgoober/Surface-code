@@ -86,14 +86,11 @@ surface_code/
 - [Fez blueprint](docs/figures/heavyhex-blueprint.png), with both physical layouts.
   After installing the package and Matplotlib, regenerate entirely offline with
   `python docs/figures/draw_blueprint.py`.
-- [Planned learned decoder](docs/ml-decoder.md).
 - References: [Chamberland et al., PRX 2020](https://arxiv.org/abs/1907.09528)
   and [Sundaresan et al., Nature Communications 2023](https://www.nature.com/articles/s41467-023-38247-5).
 
-The old rotated `[[9,1,3]]` implementation and lifetime experiments are archived
-on the [`lifetime-preservation` branch](https://github.com/GoofyGgoober/Surface-code/tree/lifetime-preservation).
-They are no longer the default or an active code path. The import namespace
-`surface_code` and CLI name `surface-code` are retained.
+The old rotated `[[9,1,3]]` code and lifetime experiments live on
+[`lifetime-preservation`](https://github.com/GoofyGgoober/Surface-code/tree/lifetime-preservation).
 
 ## Checks
 

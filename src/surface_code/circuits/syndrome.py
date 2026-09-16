@@ -45,10 +45,6 @@ def _conjugate_cx(pauli: Pauli, control: int, target: int) -> Pauli:
     return Pauli(frozenset(x), frozenset(z))
 
 
-def abstract_syndrome(error: Pauli, *, patch: HeavyHexPatch = PATCH) -> tuple[int, ...]:
-    return patch.code.syndrome(error)
-
-
 def gauge_flips(error: Pauli, *, patch: HeavyHexPatch = PATCH) -> tuple[int, ...]:
     """Propagate an injected Pauli to relative gauge-bit flips, not absolute outcomes."""
     patch.code.validate_data_pauli(error, name="error")

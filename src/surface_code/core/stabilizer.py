@@ -94,20 +94,6 @@ class StabilizerCode:
             bits |= 1 << (self.n + self._positions[qubit])
         return bits
 
-    def from_symplectic(self, bits: int) -> Pauli:
-        if bits < 0 or bits >= 1 << (2 * self.n):
-            raise ValueError(f"symplectic value does not fit {2 * self.n} bits: {bits!r}")
-        return Pauli(
-            x=frozenset(
-                qubit for position, qubit in enumerate(self.data_qubits) if bits & (1 << position)
-            ),
-            z=frozenset(
-                qubit
-                for position, qubit in enumerate(self.data_qubits)
-                if bits & (1 << (self.n + position))
-            ),
-        )
-
     @cached_property
     def stabilizer_basis(self) -> tuple[int, ...]:
         rows = [self.to_symplectic(stabilizer) for stabilizer in self.stabilizers]
@@ -128,18 +114,3 @@ class StabilizerCode:
         return all(pauli.commutes(stabilizer) for stabilizer in self.stabilizers) and not (
             self.in_stabilizer_group(pauli)
         )
-
-    def distance(self) -> int:
-        best = self.n
-        for bits in range(1, 1 << (2 * self.n)):
-            pauli = self.from_symplectic(bits)
-            weight = pauli.weight()
-            if weight >= best:
-                continue
-            if self.is_logical(pauli):
-                best = weight
-        return best
-
-    def parameters(self) -> tuple[int, ...]:
-        k = self.n - self.stabilizer_rank()
-        return (self.n, k, self.distance())

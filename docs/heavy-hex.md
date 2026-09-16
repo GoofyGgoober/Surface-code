@@ -118,15 +118,3 @@ placement only: applying a layout to the ideal circuit does not produce a
 validated fault-tolerant circuit. The next stage is the explicit flagged
 extraction schedule, repeated-round preparation/readout protocol, realistic
 noise simulation, and a decoder derived from that circuit.
-
-## Migration from the rotated code
-
-The old rotated patch, its eight-bit syndrome, fixed circuit constant, and
-minimum-weight lookup have been removed from the active package. Use
-`get_patch(distance)` and instance properties instead of the former root-level
-`X_CHECKS`, `STABILIZERS`, or `SYNDROME_CIRCUIT` constants. Use
-`syndrome_circuit(patch)` to build the ideal gauge operations.
-
-Data Q1 replaces the old convention starting at Q0, with column-major grid
-ordering. Saved rotated-code syndromes/results cannot be reinterpreted as
-heavy-hex data. The old implementation remains on `lifetime-preservation`.

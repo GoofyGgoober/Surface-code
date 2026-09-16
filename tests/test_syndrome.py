@@ -3,14 +3,7 @@ from itertools import combinations, product
 import pytest
 
 from surface_code import Pauli, get_patch
-from surface_code.circuits import (
-    CX,
-    H,
-    MeasureZ,
-    abstract_syndrome,
-    extract_syndrome,
-    syndrome_circuit,
-)
+from surface_code.circuits import CX, H, MeasureZ, extract_syndrome, syndrome_circuit
 
 
 @pytest.mark.parametrize("distance", [3, 5])
@@ -23,7 +16,7 @@ def test_circuit_matches_commutation_through_correctable_weights(distance):
                     frozenset(q for q, axis in zip(support, axes) if axis in "XY"),
                     frozenset(q for q, axis in zip(support, axes) if axis in "YZ"),
                 )
-                assert extract_syndrome(error, patch=patch) == abstract_syndrome(error, patch=patch)
+                assert extract_syndrome(error, patch=patch) == patch.code.syndrome(error)
 
 
 @pytest.mark.parametrize("distance", [3, 5])

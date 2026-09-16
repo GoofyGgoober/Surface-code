@@ -168,7 +168,3 @@ def shot_success(
         bit ^ (q in flipped) for q, bit in zip(patch.data_qubits, data_bits) if q in support
     )
     return int(parity % 2 == 0)
-
-
-def shot_z_success(syndrome: Bits, data_bits: Bits, *, patch: HeavyHexPatch = PATCH) -> int:
-    return shot_success(syndrome, data_bits, patch=patch, basis="Z")

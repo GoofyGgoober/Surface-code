@@ -13,10 +13,10 @@ from typing import Any
 
 from .._validation import validate_binary_bits
 from ..core import Pauli
-from ..decoders import decode, z_basis_success
+from ..decoders import basis_success, decode
 from ..layouts import get_fez_layout
 from ..patches import PATCH, HeavyHexPatch, get_patch
-from .aer import run_aer, shot_z_success, to_qiskit
+from .aer import run_aer, shot_success, to_qiskit
 from .cli_arguments import DEFAULT_SHOTS as DEFAULT_SHOTS
 from .cli_arguments import build_parser as build_parser
 from .cli_arguments import parse_data_qubit, parse_positive_int, parse_probability
@@ -121,7 +121,7 @@ def _summarize_tallies(tallies: Tallies, *, patch: HeavyHexPatch = PATCH) -> dic
         validate_binary_bits("data result", data, len(patch.data_qubits))
         if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
             raise ValueError(f"outcome count must be a positive integer, got {count!r}")
-        success = shot_z_success(syndrome, data, patch=patch)
+        success = shot_success(syndrome, data, patch=patch)
         by_syndrome[syndrome] = by_syndrome.get(syndrome, 0) + count
         survived += count * success
         outcomes.append(
@@ -262,7 +262,7 @@ def _syndrome_payload(error: Pauli, *, patch: HeavyHexPatch = PATCH) -> dict[str
         "fired_checks": [name for name, bit in zip(_check_names(patch=patch), syndrome) if bit],
         "correction": _plain_pauli(correction, patch=patch),
         "residual_logical": _logical_class(error, correction, patch=patch),
-        "decoded_z_success": bool(z_basis_success(error, code=patch.code)),
+        "decoded_z_success": bool(basis_success(error, code=patch.code)),
     }
 
 

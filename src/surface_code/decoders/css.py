@@ -68,7 +68,3 @@ def basis_success(error: Pauli, code: SubsystemCode | None = None, *, basis: str
     residual = decode(code.syndrome(error), code) * error
     logical = code.logical_z if basis == "Z" else code.logical_x
     return int(residual.commutes(logical))
-
-
-def z_basis_success(error: Pauli, code: SubsystemCode | None = None) -> int:
-    return basis_success(error, code, basis="Z")
