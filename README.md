@@ -17,6 +17,7 @@ respectively. Their combined footprint is 88 distinct sites.
 
 - Both patches, their gauge groups, stabilizers, logicals, and code distances.
 - Ideal gauge-measurement circuits and local Aer stabilizer simulation in X or Z basis.
+- A routed d=3 extraction schedule using only real Fez bonds (relays active).
 - A code-capacity decoder that minimizes X and Z error components separately.
 - CLI error exploration, syndrome decoding, error sweeps, and both cached Fez layouts.
 - Tests of all weight-1 data Paulis at d=3 and all weight-1/2 data Paulis at d=5.

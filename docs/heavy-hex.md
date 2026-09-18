@@ -90,6 +90,17 @@ an ideal preparation, not a hardware preparation protocol.
 The same injected error is used for all shots. CLI random-error draws sample
 a Pauli once before execution; shots do not independently resample that error.
 
+## Device readout (d=3)
+
+`circuits.routed.extraction_circuit()` measures one full stabilizer round on
+real `ibm_fez` bonds: weight-4 Z stabilizers read through their tiling X
+ancillas, weight-2 ones through boundary relays, then the X gauges directly.
+All 32 two-qubit gates are device bonds; `tests/test_routed.py` enforces this
+against the cached map, and `routed_gauge_flips()` agrees with the ideal
+`gauge_flips()` on all weight-0/1 data errors. The 8 intermediate outcomes are
+flag measurements that herald hook errors; decoding them is future work. d=5
+is not covered.
+
 ## Decoder
 
 The decoder finds a minimum-weight X correction from the Z stabilizers and

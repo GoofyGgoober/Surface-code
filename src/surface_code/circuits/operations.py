@@ -17,3 +17,8 @@ class CX:
 @dataclass(frozen=True)
 class MeasureZ:
     qubit: int
+
+
+@dataclass(frozen=True)
+class Reset:
+    qubit: int
