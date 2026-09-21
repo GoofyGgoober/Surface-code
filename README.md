@@ -13,16 +13,18 @@ ancillas, 8 boundary relays; 57 without the relays). Both embed disjointly
 on Fez.
 
 **Done:** gauge group, stabilizers and logicals at d=3 and d=5; a Fez
-embedding on existing couplers; ideal and flagged d=3 gauge schedules; a
-check that every single fault in those gadgets deflags to a correctable data
-error; stabilizer-simulator memory runs.
+embedding on existing couplers; ideal and flagged d=3/d=5 gauge schedules;
+gadget-local single-fault propagation checks; stabilizer-simulator memory runs.
+The d=5 circuit uses 65 reused qubits and its CX bonds match the saved blueprint.
+Noiseless logical-frame and check consistency are tested in both bases across
+multiple rounds. These checks do not establish full circuit-level distance five.
 
-**Not done:** multi-round decoding, native-gate compilation, any QPU result.
+**Not done:** d=5 decoding, multi-round decoding, native-gate compilation, any QPU result.
 
 ## Docs
 
-- [Blueprint: d=3 and d=5 on Fez](docs/figures/heavyhex-blueprint.png). d=5 is
-  a connectivity-validated layout, not yet a circuit. Regenerate offline with
+- [Blueprint: d=3 and d=5 on Fez](docs/figures/heavyhex-blueprint.png). The flagged circuits
+  follow these layouts. Regenerate the figure offline with
   `python docs/figures/draw_blueprint.py` (needs Matplotlib).
 - [docs/ml-decoder.md](docs/ml-decoder.md): planned learned decoder.
 
@@ -62,3 +64,24 @@ ruff format --check .
 ```
 
 QPU jobs need explicit per-run permission (see `AGENTS.md`).
+
+## Local d=5 circuit
+
+```bash
+heavyhex --distance 5 circuit
+heavyhex --distance 5 --json run --shots 128 --seed 7
+```
+
+The CLI runs one round. For repeated rounds, use
+`memory_circuit_flagged(D5, rounds=3, basis="X")` from `heavyhex.circuits.flagged`
+with `D5` from `heavyhex.patches.operators`, or call `run_memory_flagged` from
+`heavyhex.simulation.aer` with the same arguments. The schedule exposes abstract
+qubit roles through `schedule.roles` and records each measurement's round,
+kind, gauge and classical-bit index. Data qubits are first, then X ancillas,
+Z ancillas and boundary relays; physical placement is a separate mapping.
+
+At d=5, `success` (CLI: `successes`) is `None`/JSON `null`: the lookup decoder
+supports only d=3. The returned syndrome still describes round zero; full
+history decoding and circuit-noise flag conditioning are the next MWPM stage.
+The current virtual back-action subtraction supports noiseless validation and
+post-preparation data-error checks, not general noisy decoding.
