@@ -1,33 +1,18 @@
 # ML decoder (planned)
 
-## Goal
+**Goal.** Map a shot's gauge history and final data readout to a logical-flip
+prediction, as a drop-in alternative to the lookup decoder.
 
-A learned decoder for the heavy-hex code: input a shot's gauge history plus
-final data readout, output the logical-flip prediction. It plugs into the
-memory sweeps the same way any other decoder does.
+**Why.** Lookup tables grow as \(2^{n_{checks}}\) and stop at d=5, and real
+device noise is correlated, biased and drifting. A learned decoder can fit it.
 
-## Why
+**Training data.** Simulated shots labelled by their sampled faults, so the
+simulator must record per-shot faults.
 
-Exact inference dies at d=5 — the syndrome/logical class table grows as
-\(2^{n_{checks}}\) while a matching or learned decoder stays polynomial. And
-the real device has correlated, biased, drifting noise no analytic model
-captures. A learned decoder fits the device, not the sketch. IBM's heavy-hex
-demo already needed matching + ML for this reason.
+**Baseline and metric.** Flag-conditioned minimum-weight matching on the
+derived stabilizers. Compare decoded logical failure and decode time per
+shot; ship only if it beats matching on mismatched noise or is decisively
+faster.
 
-## Training data
-
-Free once the heavy-hex sim exists: it generates unlimited labeled shots,
-since the simulator knows the sampled faults. Per-shot fault records are a
-requirement on the sim, not an afterthought.
-
-## Baselines and metric
-
-Baseline: flag-conditioned minimum-weight matching on derived stabilizers.
-Metric: decoded logical failure on fixed-duration memory sweeps, plus
-wall-clock decode time per shot. The learned decoder ships only if it beats
-matching on device-like (mismatched) noise or runs decisively faster.
-
-## Non-goals
-
-No real-time FPGA work yet. No claim on small matched models — enumeration
-already wins those.
+**Non-goals.** Real-time FPGA decoding; small matched models, where
+enumeration already wins.
